@@ -1,31 +1,37 @@
+struct User {
+  name: String,
+  age: u32,
+  active: bool,
+}
+
 fn main() {
-    stack_fn();   // Call the function that uses stack memory
-    heap_fn();    // Call the function that uses heap memory
-    update_string();  // Call the function that changes size of variable at runtime
+  let name = String::from("Pranab");
+
+  let user1 = User{
+    name,
+    age: 21,
+    active: true,
+  };
+
+  println!("{} is {} years old and active: {}", user1.name , user1.age, user1.active );
+
 }
 
-fn stack_fn() {
-    // Declare a few integers on the stack
-    let a = 10;
-    let b = 20;
-    let c = a + b;
-    println!("Stack function: The sum of {} and {} is {}", a, b, c);
-}
+// struct User {
+//     active: bool,
+//     sign_in_count: u64,
+// }
 
-fn heap_fn() {
-    // Create a string, which is allocated on the heap
-    let s1 = String::from("Hello");
-    let s2 = String::from("World");
-    let combined = format!("{} {}", s1, s2);
-    println!("Heap function: Combined string is '{}'", combined);
-}
+// fn main() {
+//     let mut user1 = User {
+//         active: true,
+//         sign_in_count: 1,
+//     };
 
-fn update_string() {
-    // Start with a base string on the heap
-    let mut s = String::from("Initial string");
-    println!("Before update: {}", s);
+//     print_name(user1);
+//     print!("User 1 username: {}", user1.active); // Error - can not use borrowed value
+// }
 
-    // Append some text to the string
-    s.push_str(" and some additional text");
-    println!("After update: {}", s);
-}
+// fn print_name(user1: User) {
+//     print!("User 1 username: {}", user1.active);
+// }
