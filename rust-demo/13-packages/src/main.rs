@@ -1,19 +1,15 @@
+use chrono::{Local, Utc};
+
 fn main() {
-  let my_string = String::from("Pranab");
+    // Get the current date and time in UTC
+    let now = Utc::now();
+    println!("Current date and time in UTC: {}", now);
 
-  match find_first_a(my_string) {
-      Some(index) => println!("a found on index : {} ", index),
-      None => print!("No 'a' was found in the String"),
-  }
-}
+    // Format the date and time
+    let formatted = now.format("%Y-%m-%d %H:%M:%S");
+    println!("Formatted date and time: {}", formatted);
 
-fn find_first_a(my_string : String) -> Option<i32> {
-
-  for (index , character) in my_string.chars().enumerate() {
-    if character == 'a' {
-        return Some(index as i32)
-    }
-  }
-
-  return None;
+    // Get local time
+    let local = Local::now();
+    println!("Current date and time in local: {}", local);
 }
