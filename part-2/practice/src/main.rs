@@ -8,7 +8,7 @@ fn fibonacci(n: u32) -> u32 {
 }
 
 fn main() {
-    let n = 2;
+    let n = 4;
 
     if n <= 0 {
         println!("Please enter a positive integer");
