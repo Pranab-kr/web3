@@ -8,5 +8,9 @@ fn main() {
 
 fn largest<T: std::cmp::PartialOrd>(a: T, b: T) -> T {
     //Generice in Rust
-    if a > b { a } else { b }
+    if a > b {
+        a
+    } else {
+        b
+    }
 }
