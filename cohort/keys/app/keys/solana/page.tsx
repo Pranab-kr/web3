@@ -67,7 +67,7 @@ export default function SolanaPage() {
   const [savedMnemonic, setSavedMnemonic] = useState<string | null>(null);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
-  const [phraseOpen, setPhraseOpen] = useState(true);
+  const [phraseOpen, setPhraseOpen] = useState(false);
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
 
   // Load from localStorage on mount
@@ -118,7 +118,7 @@ export default function SolanaPage() {
     localStorage.setItem(MNEMONIC_KEY, phrase);
     setSavedMnemonic(phrase);
     setMnemonicInput("");
-    setPhraseOpen(true);
+    setPhraseOpen(false);
   };
 
   const handleAddWallet = () => {
@@ -170,7 +170,6 @@ export default function SolanaPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-5xl px-6 py-12 space-y-10">
-
         {/* ── Input — only shown when no phrase saved yet ── */}
         {!savedMnemonic && (
           <div className="space-y-2">
@@ -185,7 +184,11 @@ export default function SolanaPage() {
                 onKeyDown={(e) => e.key === "Enter" && handleAddMnemonic()}
                 className="font-mono h-9 text-sm flex-1"
               />
-              <Button onClick={handleAddMnemonic} size="lg" className="shrink-0">
+              <Button
+                onClick={handleAddMnemonic}
+                size="lg"
+                className="shrink-0"
+              >
                 Add Phrase
               </Button>
             </div>
@@ -244,7 +247,11 @@ export default function SolanaPage() {
                 Solana Wallet
               </h2>
               <div className="flex items-center gap-2">
-                <Button variant="outline" size="default" onClick={handleAddWallet}>
+                <Button
+                  variant="outline"
+                  size="default"
+                  onClick={handleAddWallet}
+                >
                   Add Wallet
                 </Button>
                 <Button
@@ -283,7 +290,10 @@ export default function SolanaPage() {
                       <span className="font-mono text-sm text-muted-foreground break-all">
                         {wallet.publicKey}
                       </span>
-                      <CopyButton text={wallet.publicKey} className="shrink-0" />
+                      <CopyButton
+                        text={wallet.publicKey}
+                        className="shrink-0"
+                      />
                     </div>
                   </div>
 
@@ -319,9 +329,12 @@ export default function SolanaPage() {
         {/* ── Empty state ── */}
         {!savedMnemonic && (
           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
-            <p className="text-sm text-muted-foreground">No phrase added yet.</p>
+            <p className="text-sm text-muted-foreground">
+              No phrase added yet.
+            </p>
             <p className="text-xs text-muted-foreground">
-              Paste your 12 or 24-word mnemonic above and press &ldquo;Add Phrase&rdquo;.
+              Paste your 12 or 24-word mnemonic above and press &ldquo;Add
+              Phrase&rdquo;.
             </p>
           </div>
         )}
