@@ -1,73 +1,100 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Eye, EyeOff, Trash2, Copy, Check, PlusCircle } from "lucide-react";
+import { Eye, EyeOff, Trash2, Copy, Check, ChevronUp, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-} from "@/components/ui/card";
+  Collapsible,
+  CollapsibleTrigger,
+  CollapsibleContent,
+} from "@/components/ui/collapsible";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { generateSolanaWallet } from "@/lib/WallGen";
 
 const STORAGE_KEY = "solana_wallets";
-const MNEMONIC_KEY = "solana_mnemonic";
+const MNEMONICS_KEY = "solana_mnemonics"; // array of saved mnemonics
 
 type Wallet = {
   index: number;
   publicKey: string;
   privateKey: string;
   path: string;
+  mnemonicIndex: number; // which mnemonic this wallet belongs to
 };
 
-function truncate(str: string, start = 8, end = 8) {
-  if (str.length <= start + end) return str;
-  return `${str.slice(0, start)}...${str.slice(-end)}`;
-}
+type SavedMnemonic = {
+  id: string; // unique id
+  phrase: string;
+  label: string; // e.g. "Phrase 1"
+};
 
-function CopyButton({ text }: { text: string }) {
+function CopyButton({ text, className }: { text: string; className?: string }) {
   const [copied, setCopied] = useState(false);
-
   const handleCopy = async () => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };
-
   return (
     <button
       onClick={handleCopy}
-      className="ml-1 inline-flex items-center text-muted-foreground hover:text-foreground transition-colors"
-      title="Copy to clipboard"
+      className={`inline-flex items-center text-muted-foreground hover:text-foreground transition-colors ${className ?? ""}`}
+      title="Copy"
     >
-      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+      {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
     </button>
   );
 }
 
 export default function SolanaPage() {
-  const [mnemonic, setMnemonic] = useState("");
-  const [wallets, setWallets] = useState<Wallet[]>([]);
-  const [storedMnemonic, setStoredMnemonic] = useState<string | null>(null);
+  const [mnemonicInput, setMnemonicInput] = useState("");
   const [error, setError] = useState("");
-  const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
 
-  // Load from localStorage on mount
+  const [savedMnemonics, setSavedMnemonics] = useState<SavedMnemonic[]>([]);
+  const [activeMnemonicId, setActiveMnemonicId] = useState<string>("");
+
+  const [wallets, setWallets] = useState<Wallet[]>([]);
+  const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
+  const [phraseOpen, setPhraseOpen] = useState(true);
+
+  // Load from localStorage
   useEffect(() => {
     try {
-      const savedMnemonic = localStorage.getItem(MNEMONIC_KEY);
-      const savedWallets = localStorage.getItem(STORAGE_KEY);
-      if (savedMnemonic) setStoredMnemonic(savedMnemonic);
-      if (savedWallets) setWallets(JSON.parse(savedWallets));
+      const rawMnemonics = localStorage.getItem(MNEMONICS_KEY);
+      const rawWallets = localStorage.getItem(STORAGE_KEY);
+
+      const mnemonics: SavedMnemonic[] = rawMnemonics
+        ? JSON.parse(rawMnemonics)
+        : [];
+      const walls: Wallet[] = rawWallets ? JSON.parse(rawWallets) : [];
+
+      setSavedMnemonics(mnemonics);
+      setWallets(walls);
+
+      if (mnemonics.length > 0) setActiveMnemonicId(mnemonics[0].id);
     } catch {
-      // ignore parse errors
+      // ignore
     }
   }, []);
 
-  // Persist wallets to localStorage whenever they change
+  // Persist mnemonics
+  useEffect(() => {
+    if (savedMnemonics.length > 0) {
+      localStorage.setItem(MNEMONICS_KEY, JSON.stringify(savedMnemonics));
+    } else {
+      localStorage.removeItem(MNEMONICS_KEY);
+    }
+  }, [savedMnemonics]);
+
+  // Persist wallets
   useEffect(() => {
     if (wallets.length > 0) {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(wallets));
@@ -76,12 +103,22 @@ export default function SolanaPage() {
     }
   }, [wallets]);
 
-  const handleAdd = () => {
+  const activeMnemonic = savedMnemonics.find((m) => m.id === activeMnemonicId);
+  const activeWords = activeMnemonic ? activeMnemonic.phrase.split(/\s+/) : [];
+
+  // Wallets belonging to the currently selected mnemonic
+  const activeWallets = wallets.filter(
+    (w) =>
+      w.mnemonicIndex ===
+      savedMnemonics.findIndex((m) => m.id === activeMnemonicId)
+  );
+
+  const handleAddMnemonic = () => {
     setError("");
-    const phrase = mnemonic.trim();
+    const phrase = mnemonicInput.trim();
 
     if (!phrase) {
-      setError("Please paste a mnemonic phrase.");
+      setError("Paste a mnemonic phrase first.");
       return;
     }
 
@@ -91,51 +128,59 @@ export default function SolanaPage() {
       return;
     }
 
-    // If a mnemonic is already stored, ensure it matches
-    if (storedMnemonic && storedMnemonic !== phrase) {
-      setError(
-        "This mnemonic doesn't match the stored one. Clear all wallets first to use a different mnemonic.",
-      );
+    // Prevent duplicate mnemonics
+    if (savedMnemonics.some((m) => m.phrase === phrase)) {
+      setError("This phrase is already saved.");
       return;
     }
 
+    const id = crypto.randomUUID();
+    const label = `Phrase ${savedMnemonics.length + 1}`;
+    const newMnemonic: SavedMnemonic = { id, phrase, label };
+
+    setSavedMnemonics((prev) => [...prev, newMnemonic]);
+    setActiveMnemonicId(id);
+    setMnemonicInput("");
+    setPhraseOpen(true);
+  };
+
+  const handleAddWallet = () => {
+    if (!activeMnemonic) {
+      setError("Select or add a mnemonic phrase first.");
+      return;
+    }
+    setError("");
+
     try {
-      const nextIndex = wallets.length;
-      const { publicKey, privateKey } = generateSolanaWallet(phrase, nextIndex);
+      const mnemonicIndex = savedMnemonics.findIndex(
+        (m) => m.id === activeMnemonicId
+      );
+      // Count wallets already derived from this mnemonic to get next index
+      const existingCount = wallets.filter(
+        (w) => w.mnemonicIndex === mnemonicIndex
+      ).length;
+
+      const { publicKey, privateKey } = generateSolanaWallet(
+        activeMnemonic.phrase,
+        existingCount
+      );
 
       const newWallet: Wallet = {
-        index: nextIndex,
+        index: wallets.length, // global unique index
         publicKey,
         privateKey,
-        path: `m/44'/501'/${nextIndex}'/0'`,
+        path: `m/44'/501'/${existingCount}'/0'`,
+        mnemonicIndex,
       };
 
-      // Save the mnemonic on first wallet creation
-      if (!storedMnemonic) {
-        localStorage.setItem(MNEMONIC_KEY, phrase);
-        setStoredMnemonic(phrase);
-      }
-
       setWallets((prev) => [...prev, newWallet]);
-      setMnemonic("");
     } catch {
-      setError("Invalid mnemonic. Please check the phrase and try again.");
+      setError("Failed to derive wallet. The mnemonic may be invalid.");
     }
   };
 
-  const handleRemove = (index: number) => {
-    setWallets((prev) => {
-      const updated = prev.filter((w) => w.index !== index);
-      // Re-derive removed wallets would change derivation paths,
-      // so we just remove and keep the existing ones with their original paths.
-      // We DON'T re-index to preserve derivation path integrity.
-      if (updated.length === 0) {
-        localStorage.removeItem(MNEMONIC_KEY);
-        setStoredMnemonic(null);
-      }
-
-      return updated;
-    });
+  const handleRemoveWallet = (index: number) => {
+    setWallets((prev) => prev.filter((w) => w.index !== index));
     setVisibleKeys((prev) => {
       const next = { ...prev };
       delete next[index];
@@ -143,149 +188,200 @@ export default function SolanaPage() {
     });
   };
 
-  const handleClearAll = () => {
-    setWallets([]);
-    setStoredMnemonic(null);
+  const handleClearWallets = () => {
+    const mnemonicIndex = savedMnemonics.findIndex(
+      (m) => m.id === activeMnemonicId
+    );
+    setWallets((prev) => prev.filter((w) => w.mnemonicIndex !== mnemonicIndex));
     setVisibleKeys({});
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(MNEMONIC_KEY);
   };
 
-  const toggleKeyVisibility = (index: number) => {
+  const toggleKey = (index: number) => {
     setVisibleKeys((prev) => ({ ...prev, [index]: !prev[index] }));
   };
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="mx-auto max-w-7xl px-4 py-10 space-y-8">
-        {/* Header */}
-        <div className="space-y-1">
-          <h1 className="text-4xl font-semibold tracking-tight">
-            Solana HD Wallet
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Paste your BIP39 mnemonic to derive Solana keypairs using{" "}
-            <span className="font-mono">
-              m/44&apos;/501&apos;/n&apos;/0&apos;
-            </span>
-          </p>
+      <div className="mx-auto max-w-5xl px-6 py-12 space-y-10">
+
+        {/* ── Mnemonic input row ── */}
+        <div className="flex gap-2">
+          <Input
+            placeholder="Enter your secret phrase (12 or 24 words)..."
+            value={mnemonicInput}
+            onChange={(e) => {
+              setMnemonicInput(e.target.value);
+              setError("");
+            }}
+            onKeyDown={(e) => e.key === "Enter" && handleAddMnemonic()}
+            className="font-mono h-9 text-sm flex-1"
+          />
+          <Button onClick={handleAddMnemonic} size="lg" className="shrink-0">
+            Add Phrase
+          </Button>
         </div>
+        {error && <p className="text-xs text-destructive -mt-6">{error}</p>}
 
-        {/* Input section */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-2xl">Add Wallet</CardTitle>
-            <CardDescription>
-              {wallets.length === 0
-                ? "Paste a 12 or 24-word mnemonic phrase and press Add."
-                : `Wallet #${wallets.length} will be derived from the stored mnemonic. Paste it again to confirm.`}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <Input
-              placeholder="word1 word2 word3 ... word12"
-              value={mnemonic}
-              onChange={(e) => {
-                setMnemonic(e.target.value);
-                setError("");
+        {/* ── Phrase selector dropdown (only when >1 saved) ── */}
+        {savedMnemonics.length > 1 && (
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">Active phrase:</span>
+            <Select
+              value={activeMnemonicId}
+              onValueChange={(val) => {
+                if (val) setActiveMnemonicId(val);
+                setPhraseOpen(true);
               }}
-              onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-              className="font-mono text-xs"
-            />
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            <div className="flex items-center gap-2">
-              <Button onClick={handleAdd} size="default">
-                <PlusCircle className="size-3.5" />
-                Add Wallet
-              </Button>
-              {wallets.length > 0 && (
-                <Button
-                  variant="destructive"
-                  size="default"
-                  onClick={handleClearAll}
-                >
-                  <Trash2 className="size-4" />
-                  Clear All
-                </Button>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+            >
+              <SelectTrigger className="w-48">
+                <SelectValue placeholder="Select phrase" />
+              </SelectTrigger>
+              <SelectContent>
+                {savedMnemonics.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
-        {/* Wallet list */}
-        {wallets.length > 0 && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-medium">
-                {wallets.length} wallet{wallets.length !== 1 ? "s" : ""}
-              </h2>
-              <span className="text-xs text-muted-foreground font-mono">
-                {storedMnemonic ? truncate(storedMnemonic, 12, 12) : ""}
-              </span>
-            </div>
+        {/* ── Your Secret Phrase collapsible ── */}
+        {activeMnemonic && (
+          <Collapsible open={phraseOpen} onOpenChange={setPhraseOpen}>
+            <Card className="overflow-hidden">
+              <CollapsibleTrigger className="w-full flex items-center justify-between px-6 py-5 text-left hover:bg-muted/30 transition-colors">
+                <span className="text-xl font-bold tracking-tight">
+                  Your Secret Phrase
+                </span>
+                {phraseOpen ? (
+                  <ChevronUp className="size-5 text-muted-foreground" />
+                ) : (
+                  <ChevronDown className="size-5 text-muted-foreground" />
+                )}
+              </CollapsibleTrigger>
 
-            {wallets.map((wallet) => (
-              <Card key={wallet.index}>
-                <CardHeader>
-                  <CardTitle className="flex items-center justify-between">
-                    <span>Wallet #{wallet.index + 1}</span>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-mono font-normal text-muted-foreground">
-                        {wallet.path}
-                      </span>
-                      <Button
-                        variant="destructive"
-                        size="icon-xs"
-                        onClick={() => handleRemove(wallet.index)}
-                        title="Remove wallet"
+              <CollapsibleContent>
+                <div className="px-6 pb-6 space-y-4">
+                  {/* Word grid — 4 columns */}
+                  <div className="grid grid-cols-4 gap-2">
+                    {activeWords.map((word, i) => (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 rounded-none border border-border bg-muted/40 px-3 py-2.5"
                       >
-                        <Trash2 className="size-3" />
-                      </Button>
-                    </div>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Public key */}
-                  <div className="space-y-1">
-                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                      Public Key
-                    </p>
-                    <div className="flex items-center gap-1 rounded-none border border-input bg-muted/40 px-2.5 py-1.5">
-                      <span className="flex-1 font-mono text-xs break-all">
+                        <span className="text-xs text-muted-foreground w-4 shrink-0 select-none">
+                          {i + 1}
+                        </span>
+                        <span className="text-sm font-medium">{word}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Copy hint */}
+                  <button
+                    onClick={() =>
+                      navigator.clipboard.writeText(activeMnemonic.phrase)
+                    }
+                    className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <Copy className="size-3.5" />
+                    Click Anywhere To Copy
+                  </button>
+                </div>
+              </CollapsibleContent>
+            </Card>
+          </Collapsible>
+        )}
+
+        {/* ── Solana Wallet section ── */}
+        {activeMnemonic && (
+          <div className="space-y-4">
+            {/* Section header */}
+            <div className="flex items-center justify-between">
+              <h2 className="text-3xl font-bold tracking-tight">
+                Solana Wallet
+              </h2>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="default"
+                  onClick={handleAddWallet}
+                >
+                  Add Wallet
+                </Button>
+                {activeWallets.length > 0 && (
+                  <Button
+                    variant="destructive"
+                    size="default"
+                    onClick={handleClearWallets}
+                  >
+                    Clear Wallets
+                  </Button>
+                )}
+              </div>
+            </div>
+
+            {/* Empty state */}
+            {activeWallets.length === 0 && (
+              <p className="text-sm text-muted-foreground py-8 text-center">
+                No wallets yet — press &ldquo;Add Wallet&rdquo; to derive one.
+              </p>
+            )}
+
+            {/* Wallet cards */}
+            {activeWallets.map((wallet) => (
+              <Card key={wallet.index} className="overflow-hidden">
+                {/* Card header row */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                  <span className="text-lg font-bold">
+                    Wallet {activeWallets.indexOf(wallet) + 1}
+                  </span>
+                  <button
+                    onClick={() => handleRemoveWallet(wallet.index)}
+                    className="text-destructive hover:text-destructive/70 transition-colors"
+                    title="Remove wallet"
+                  >
+                    <Trash2 className="size-5" />
+                  </button>
+                </div>
+
+                <CardContent className="px-6 py-5 space-y-5">
+                  {/* Public Key */}
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-bold">Public Key</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-sm text-muted-foreground break-all">
                         {wallet.publicKey}
                       </span>
-                      <CopyButton text={wallet.publicKey} />
+                      <CopyButton text={wallet.publicKey} className="shrink-0" />
                     </div>
                   </div>
 
-                  {/* Private key */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between">
-                      <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-                        Private Key
-                      </p>
-                      <button
-                        onClick={() => toggleKeyVisibility(wallet.index)}
-                        className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                      >
-                        {visibleKeys[wallet.index] ? (
-                          <>
-                            <EyeOff className="size-3" /> Hide
-                          </>
-                        ) : (
-                          <>
-                            <Eye className="size-3" /> Show
-                          </>
-                        )}
-                      </button>
-                    </div>
-                    <div className="flex items-center gap-1 rounded-none border border-input bg-muted/40 px-2.5 py-1.5">
-                      <span className="flex-1 font-mono text-xs break-all">
+                  {/* Divider */}
+                  <div className="h-px bg-border" />
+
+                  {/* Private Key */}
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-bold">Private Key</p>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="font-mono text-sm text-muted-foreground break-all">
                         {visibleKeys[wallet.index]
                           ? wallet.privateKey
-                          : "•".repeat(64)}
+                          : Array(64).fill("•").join(" ")}
                       </span>
-                      <CopyButton text={wallet.privateKey} />
+                      <button
+                        onClick={() => toggleKey(wallet.index)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        title={visibleKeys[wallet.index] ? "Hide" : "Show"}
+                      >
+                        {visibleKeys[wallet.index] ? (
+                          <EyeOff className="size-5" />
+                        ) : (
+                          <Eye className="size-5" />
+                        )}
+                      </button>
                     </div>
                   </div>
                 </CardContent>
@@ -294,15 +390,16 @@ export default function SolanaPage() {
           </div>
         )}
 
-        {wallets.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-center space-y-2">
-            <p className="text-sm text-muted-foreground">No wallets yet.</p>
+        {/* ── No phrase added yet ── */}
+        {savedMnemonics.length === 0 && (
+          <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
+            <p className="text-sm text-muted-foreground">No phrase added yet.</p>
             <p className="text-xs text-muted-foreground">
-              Paste a mnemonic above and press &ldquo;Add Wallet&rdquo; to get
-              started.
+              Paste your 12 or 24-word mnemonic above and press &ldquo;Add Phrase&rdquo;.
             </p>
           </div>
         )}
+
       </div>
     </div>
   );
