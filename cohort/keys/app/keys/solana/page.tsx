@@ -10,7 +10,6 @@ import {
   Check,
   ChevronUp,
   ChevronDown,
-  Plus,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,13 +19,6 @@ import {
   CollapsibleTrigger,
   CollapsibleContent,
 } from "@/components/ui/collapsible";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -39,20 +31,13 @@ import {
 import { generateSolanaWallet } from "@/lib/WallGen";
 
 const STORAGE_KEY = "solana_wallets";
-const MNEMONICS_KEY = "solana_mnemonics";
+const MNEMONIC_KEY = "solana_mnemonic";
 
 type Wallet = {
   index: number;
   publicKey: string;
   privateKey: string;
   path: string;
-  mnemonicIndex: number;
-};
-
-type SavedMnemonic = {
-  id: string;
-  phrase: string;
-  label: string;
 };
 
 function CopyButton({ text, className }: { text: string; className?: string }) {
@@ -78,50 +63,24 @@ export default function SolanaPage() {
 
   const [mnemonicInput, setMnemonicInput] = useState("");
   const [error, setError] = useState("");
-  const [showInput, setShowInput] = useState(true);
 
-  const [savedMnemonics, setSavedMnemonics] = useState<SavedMnemonic[]>([]);
-  const [activeMnemonicId, setActiveMnemonicId] = useState<string>("");
-
+  const [savedMnemonic, setSavedMnemonic] = useState<string | null>(null);
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [visibleKeys, setVisibleKeys] = useState<Record<number, boolean>>({});
   const [phraseOpen, setPhraseOpen] = useState(true);
-
-  // Confirmation dialog state
   const [clearDialogOpen, setClearDialogOpen] = useState(false);
 
-  // Load from localStorage
+  // Load from localStorage on mount
   useEffect(() => {
     try {
-      const rawMnemonics = localStorage.getItem(MNEMONICS_KEY);
-      const rawWallets = localStorage.getItem(STORAGE_KEY);
-
-      const mnemonics: SavedMnemonic[] = rawMnemonics
-        ? JSON.parse(rawMnemonics)
-        : [];
-      const walls: Wallet[] = rawWallets ? JSON.parse(rawWallets) : [];
-
-      setSavedMnemonics(mnemonics);
-      setWallets(walls);
-
-      if (mnemonics.length > 0) {
-        setActiveMnemonicId(mnemonics[0].id);
-        // Phrase already saved — hide the input by default
-        setShowInput(false);
-      }
+      const m = localStorage.getItem(MNEMONIC_KEY);
+      const w = localStorage.getItem(STORAGE_KEY);
+      if (m) setSavedMnemonic(m);
+      if (w) setWallets(JSON.parse(w));
     } catch {
-      // ignore parse errors
+      // ignore
     }
   }, []);
-
-  // Persist mnemonics
-  useEffect(() => {
-    if (savedMnemonics.length > 0) {
-      localStorage.setItem(MNEMONICS_KEY, JSON.stringify(savedMnemonics));
-    } else {
-      localStorage.removeItem(MNEMONICS_KEY);
-    }
-  }, [savedMnemonics]);
 
   // Persist wallets
   useEffect(() => {
@@ -132,14 +91,7 @@ export default function SolanaPage() {
     }
   }, [wallets]);
 
-  const activeMnemonic = savedMnemonics.find((m) => m.id === activeMnemonicId);
-  const activeWords = activeMnemonic ? activeMnemonic.phrase.split(/\s+/) : [];
-
-  const activeWallets = wallets.filter(
-    (w) =>
-      w.mnemonicIndex ===
-      savedMnemonics.findIndex((m) => m.id === activeMnemonicId),
-  );
+  const words = savedMnemonic ? savedMnemonic.split(/\s+/) : [];
 
   const handleAddMnemonic = () => {
     setError("");
@@ -154,53 +106,41 @@ export default function SolanaPage() {
       setError("Mnemonic must be 12 or 24 words.");
       return;
     }
-    if (savedMnemonics.some((m) => m.phrase === phrase)) {
-      setError("This phrase is already saved.");
+
+    try {
+      // Validate by attempting to derive the first wallet
+      generateSolanaWallet(phrase, 0);
+    } catch {
+      setError("Invalid mnemonic. Please check the phrase and try again.");
       return;
     }
 
-    const id = crypto.randomUUID();
-    const label = `Phrase ${savedMnemonics.length + 1}`;
-    const newMnemonic: SavedMnemonic = { id, phrase, label };
-
-    setSavedMnemonics((prev) => [...prev, newMnemonic]);
-    setActiveMnemonicId(id);
+    localStorage.setItem(MNEMONIC_KEY, phrase);
+    setSavedMnemonic(phrase);
     setMnemonicInput("");
     setPhraseOpen(true);
-    // Hide the input after the phrase is successfully added
-    setShowInput(false);
   };
 
   const handleAddWallet = () => {
-    if (!activeMnemonic) {
-      setError("Select or add a mnemonic phrase first.");
-      return;
-    }
+    if (!savedMnemonic) return;
     setError("");
     try {
-      const mnemonicIndex = savedMnemonics.findIndex(
-        (m) => m.id === activeMnemonicId,
-      );
-      const existingCount = wallets.filter(
-        (w) => w.mnemonicIndex === mnemonicIndex,
-      ).length;
-
+      const nextIndex = wallets.length;
       const { publicKey, privateKey } = generateSolanaWallet(
-        activeMnemonic.phrase,
-        existingCount,
+        savedMnemonic,
+        nextIndex,
       );
-
-      const newWallet: Wallet = {
-        index: wallets.length,
-        publicKey,
-        privateKey,
-        path: `m/44'/501'/${existingCount}'/0'`,
-        mnemonicIndex,
-      };
-
-      setWallets((prev) => [...prev, newWallet]);
+      setWallets((prev) => [
+        ...prev,
+        {
+          index: nextIndex,
+          publicKey,
+          privateKey,
+          path: `m/44'/501'/${nextIndex}'/0'`,
+        },
+      ]);
     } catch {
-      setError("Failed to derive wallet. The mnemonic may be invalid.");
+      setError("Failed to derive wallet.");
     }
   };
 
@@ -213,15 +153,12 @@ export default function SolanaPage() {
     });
   };
 
-  // Called after user confirms in the dialog
   const handleConfirmClearAll = () => {
     localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(MNEMONICS_KEY);
-    setSavedMnemonics([]);
+    localStorage.removeItem(MNEMONIC_KEY);
+    setSavedMnemonic(null);
     setWallets([]);
     setVisibleKeys({});
-    setActiveMnemonicId("");
-    setShowInput(true);
     setClearDialogOpen(false);
     router.push("/");
   };
@@ -234,8 +171,8 @@ export default function SolanaPage() {
     <div className="min-h-screen bg-background">
       <div className="mx-auto max-w-5xl px-6 py-12 space-y-10">
 
-        {/* ── Mnemonic input (hidden once a phrase is saved) ── */}
-        {showInput ? (
+        {/* ── Input — only shown when no phrase saved yet ── */}
+        {!savedMnemonic && (
           <div className="space-y-2">
             <div className="flex gap-2">
               <Input
@@ -248,78 +185,16 @@ export default function SolanaPage() {
                 onKeyDown={(e) => e.key === "Enter" && handleAddMnemonic()}
                 className="font-mono h-9 text-sm flex-1"
               />
-              <Button
-                onClick={handleAddMnemonic}
-                size="lg"
-                className="shrink-0"
-              >
+              <Button onClick={handleAddMnemonic} size="lg" className="shrink-0">
                 Add Phrase
               </Button>
-              {/* Cancel back to phrase view if there's already a saved phrase */}
-              {savedMnemonics.length > 0 && (
-                <Button
-                  variant="outline"
-                  size="lg"
-                  className="shrink-0"
-                  onClick={() => {
-                    setShowInput(false);
-                    setMnemonicInput("");
-                    setError("");
-                  }}
-                >
-                  Cancel
-                </Button>
-              )}
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
-          </div>
-        ) : (
-          /* ── "Add another phrase" trigger ── */
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              {/* Phrase selector dropdown */}
-              {savedMnemonics.length > 1 && (
-                <>
-                  <span className="text-xs text-muted-foreground">
-                    Active phrase:
-                  </span>
-                  <Select
-                    value={activeMnemonicId}
-                    onValueChange={(val) => {
-                      if (val) setActiveMnemonicId(val);
-                      setPhraseOpen(true);
-                    }}
-                  >
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Select phrase" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {savedMnemonics.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>
-                          {m.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </>
-              )}
-            </div>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setShowInput(true);
-                setError("");
-              }}
-            >
-              <Plus className="size-3.5" />
-              Add Another Phrase
-            </Button>
           </div>
         )}
 
         {/* ── Your Secret Phrase collapsible ── */}
-        {activeMnemonic && (
+        {savedMnemonic && (
           <Collapsible open={phraseOpen} onOpenChange={setPhraseOpen}>
             <Card className="overflow-hidden">
               <CollapsibleTrigger className="w-full flex items-center justify-between px-6 py-5 text-left hover:bg-muted/30 transition-colors">
@@ -335,9 +210,8 @@ export default function SolanaPage() {
 
               <CollapsibleContent>
                 <div className="px-6 pb-6 space-y-4">
-                  {/* Word grid — 4 columns */}
                   <div className="grid grid-cols-4 gap-2">
-                    {activeWords.map((word, i) => (
+                    {words.map((word, i) => (
                       <div
                         key={i}
                         className="flex items-center gap-2 rounded-none border border-border bg-muted/50 px-3 py-2.5"
@@ -349,12 +223,8 @@ export default function SolanaPage() {
                       </div>
                     ))}
                   </div>
-
-                  {/* Copy hint */}
                   <button
-                    onClick={() =>
-                      navigator.clipboard.writeText(activeMnemonic.phrase)
-                    }
+                    onClick={() => navigator.clipboard.writeText(savedMnemonic)}
                     className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <Copy className="size-3.5" />
@@ -367,7 +237,7 @@ export default function SolanaPage() {
         )}
 
         {/* ── Solana Wallet section ── */}
-        {activeMnemonic && (
+        {savedMnemonic && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-3xl font-bold tracking-tight">
@@ -377,7 +247,6 @@ export default function SolanaPage() {
                 <Button variant="outline" size="default" onClick={handleAddWallet}>
                   Add Wallet
                 </Button>
-                {/* Clear Wallets always visible once a phrase exists — opens dialog */}
                 <Button
                   variant="destructive"
                   size="default"
@@ -388,18 +257,16 @@ export default function SolanaPage() {
               </div>
             </div>
 
-            {activeWallets.length === 0 && (
+            {wallets.length === 0 && (
               <p className="text-sm text-muted-foreground py-8 text-center">
                 No wallets yet — press &ldquo;Add Wallet&rdquo; to derive one.
               </p>
             )}
 
-            {activeWallets.map((wallet) => (
+            {wallets.map((wallet, i) => (
               <Card key={wallet.index} className="overflow-hidden">
                 <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-                  <span className="text-lg font-bold">
-                    Wallet {activeWallets.indexOf(wallet) + 1}
-                  </span>
+                  <span className="text-lg font-bold">Wallet {i + 1}</span>
                   <button
                     onClick={() => handleRemoveWallet(wallet.index)}
                     className="text-destructive hover:text-destructive/70 transition-colors"
@@ -410,7 +277,6 @@ export default function SolanaPage() {
                 </div>
 
                 <CardContent className="px-6 py-5 space-y-5">
-                  {/* Public Key */}
                   <div className="space-y-1.5">
                     <p className="text-sm font-bold">Public Key</p>
                     <div className="flex items-center justify-between gap-3">
@@ -423,7 +289,6 @@ export default function SolanaPage() {
 
                   <div className="h-px bg-border" />
 
-                  {/* Private Key */}
                   <div className="space-y-1.5">
                     <p className="text-sm font-bold">Private Key</p>
                     <div className="flex items-center justify-between gap-3">
@@ -452,12 +317,11 @@ export default function SolanaPage() {
         )}
 
         {/* ── Empty state ── */}
-        {savedMnemonics.length === 0 && (
+        {!savedMnemonic && (
           <div className="flex flex-col items-center justify-center py-20 text-center space-y-2">
             <p className="text-sm text-muted-foreground">No phrase added yet.</p>
             <p className="text-xs text-muted-foreground">
-              Paste your 12 or 24-word mnemonic above and press &ldquo;Add
-              Phrase&rdquo;.
+              Paste your 12 or 24-word mnemonic above and press &ldquo;Add Phrase&rdquo;.
             </p>
           </div>
         )}
@@ -473,7 +337,7 @@ export default function SolanaPage() {
             <DialogDescription className="text-sm">
               This will permanently delete{" "}
               <span className="font-medium text-foreground">
-                all saved phrases and wallets
+                your saved phrase and all wallets
               </span>{" "}
               from this device. You will be redirected to the home page.
               <br />
